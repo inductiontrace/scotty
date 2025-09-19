@@ -1,0 +1,6 @@
+numpy
+opencv-python
+onnxruntime
+paho-mqtt
+pyyaml
+filterpy
