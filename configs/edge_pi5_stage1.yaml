@@ -1,0 +1,42 @@
+edge:
+  cam_id: "pi5_cam_a"
+  fps: 1.0
+  emit_jsonl: "data/tracks.jsonl"
+  mqtt: null  # e.g., "mqtts://user:pass@host:8883/topic"
+
+intuitus:
+  enabled: true
+  impl: "intuitus.roi_diff:DiffROI"
+  keyframe_sec: 2.0
+  min_blob_area: 300
+  dilate: 11
+  max_roi: 8
+  max_area_frac: 0.4
+
+quiddity:
+  impl: "quiddity.yoloe_pt:YOLOEPT"
+  model_path: "models/yoloe-v8-S.pt"   # direct PyTorch weights
+  conf_th: 0.35
+  classes_include: ["person"]
+
+tracker:
+  impl: "common.tracker_sort:Sort"
+  iou_th: 0.3
+  max_age: 12
+
+haecceity:
+  new_id_threshold: 0.55
+  hysteresis: 0.05
+  min_bbox_h_frac: 0.08
+  min_sharpness: 25.0
+  embed_interval_frames: 3
+  specialists:
+    - impl: "haecceity.person_osnet:PersonOSNet025"
+      model_path: "models/osnet_x0_25.onnx"
+      crop: 192
+    - impl: "haecceity.vehicle_signature:VehicleSignature"
+      hist_bins: 32
+  fallbacks:
+    - impl: "haecceity.generic_osnet:GenericOSNet025"
+      model_path: "models/osnet_x0_25.onnx"
+      crop: 192
