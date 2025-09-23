@@ -4,6 +4,7 @@ onnxruntime        # keep for Stage-2/ONNX path
 paho-mqtt
 pyyaml
 filterpy
+scipy
 ultralytics          # NEW (for .pt alias auto-download)
 
 torchreid

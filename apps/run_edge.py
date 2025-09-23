@@ -42,12 +42,17 @@ class _PassthroughTracker:
     def __init__(self) -> None:
         self._next_id = 1
 
-    def step(self, dets: List[Tuple[BBox, float, str]]) -> List[_InstantTrack]:
+    def step(
+        self, dets: List[Tuple[BBox, float, str]], _img_size: Tuple[int, int]
+    ) -> List[_InstantTrack]:
         tracks: List[_InstantTrack] = []
         for bbox, conf, clazz in dets:
             tracks.append(_InstantTrack(self._next_id, bbox, conf, clazz))
             self._next_id += 1
         return tracks
+
+    def diagnostics(self) -> List[str]:
+        return []
 
 
 class _TrackerAdapter:
@@ -56,11 +61,25 @@ class _TrackerAdapter:
     def __init__(self, tracker) -> None:
         self._tracker = tracker
         self._states: Dict[int, _InstantTrack] = {}
+        self._last_diag: List[str] = []
 
-    def step(self, dets: List[Tuple[BBox, float, str]]) -> List[_InstantTrack]:
+    def step(
+        self, dets: List[Tuple[BBox, float, str]], img_size: Tuple[int, int]
+    ) -> List[_InstantTrack]:
         tracks: List[_InstantTrack] = []
         seen: set[int] = set()
-        for tid, bbox, label, score in self._tracker.update(dets):
+        try:
+            raw_tracks = self._tracker.update(dets, img_size)
+        except TypeError:
+            raw_tracks = self._tracker.update(dets)
+
+        diag_fn = getattr(self._tracker, "consume_diagnostics", None)
+        if callable(diag_fn):
+            self._last_diag = list(diag_fn())
+        else:
+            self._last_diag = []
+
+        for tid, bbox, label, score in raw_tracks:
             box_xyxy = (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
             track = self._states.get(tid)
             if track is None:
@@ -77,6 +96,9 @@ class _TrackerAdapter:
         for tid in stale:
             del self._states[tid]
         return tracks
+
+    def diagnostics(self) -> List[str]:
+        return list(self._last_diag)
 
 LOGGER = logging.getLogger("haecceity.edge")
 logger = LOGGER
@@ -274,7 +296,12 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     for (bx1, by1, bx2, by2), conf, cls in local_dets:
                         detections.append(((bx1 + x1, by1 + y1, bx2 + x1, by2 + y1), conf, cls))
 
-            tracks = tracker.step(detections)
+            tracks = tracker.step(detections, (width, height))
+            for diag in tracker.diagnostics():
+                if "REJECT" in diag:
+                    LOGGER.info("Assoc: %s", diag)
+                else:
+                    LOGGER.debug("Assoc: %s", diag)
             events = []
             for track in tracks:
                 x1, y1, x2, y2 = track.box_xyxy
