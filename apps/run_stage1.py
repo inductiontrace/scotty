@@ -1,5 +1,33 @@
 #!/usr/bin/env python3
-import os, time, argparse, json, pathlib, yaml, cv2, sys
+import os, time, argparse, json, pathlib, yaml, sys
+import numpy as np
+import cv2
+
+
+def to_bgr(frame):
+    """
+    Normalize frames from any source (RGB, BGR, RGBA/BGRA, GRAY) to BGR (H,W,3).
+
+    Picamera2 often yields RGB or BGRA; OpenCV/USB usually yields BGR.
+    This function returns a 3-channel BGR array suitable for Ultralytics.
+    """
+    if frame is None:
+        return None
+    if frame.ndim == 2:
+        # GRAY -> BGR
+        return cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    if frame.ndim != 3:
+        raise ValueError(f"Unexpected frame ndim={frame.ndim}, expected 2 or 3.")
+    h, w, c = frame.shape
+    if c == 3:
+        # Heuristic: Picamera2 default is RGB; convert to BGR for consistency.
+        # If the source is already BGR, this conversion is harmless for YOLO.
+        return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    if c == 4:
+        # Many Pi pipelines produce XRGB/BGRA; try BGRA->BGR first.
+        # If colors look off, switch to cv2.COLOR_RGBA2BGR.
+        return cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+    raise ValueError(f"Unexpected channel count: {c}, expected 1/3/4.")
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -120,7 +148,11 @@ def main():
                 break
 
             t0 = time.time()
-            dets = detector.detect(frame)  # [((x1,y1,x2,y2), conf, class)]
+            frame_bgr = to_bgr(frame)
+            if frame_bgr is None:
+                print("WARNING: got None frame after conversion; stopping.")
+                break
+            dets = detector.detect(frame_bgr)  # [((x1,y1,x2,y2), conf, class)]
             infer_ms = (time.time() - t0) * 1000.0
 
             for (x1,y1,x2,y2), conf, clazz in dets:
