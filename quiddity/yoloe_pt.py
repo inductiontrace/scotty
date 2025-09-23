@@ -10,7 +10,8 @@ class YOLOEPT(Detector):
     Config keys:
       quiddity:
         impl: "quiddity.yoloe_pt:YOLOEPT"
-        model_name: "yolov8s"        # alias; Ultralytics downloads + caches
+        # Use either model_name (Ultralytics alias) or model_path (local file)
+        model_name: "yolov8s"
         conf_th: 0.35
         classes_include: ["person"]  # optional filter
     """
@@ -18,8 +19,19 @@ class YOLOEPT(Detector):
     def __init__(self, cfg: dict):
         self.conf_th = float(cfg.get("conf_th", 0.35))
         self.classes_include = cfg.get("classes_include")
-        model_name = cfg.get("model_name", "yolov8s")  # default alias
-        self.model = YOLO(model_name)  # no file path needed
+
+        model_name = cfg.get("model_name")
+        model_path = cfg.get("model_path")
+
+        if model_path and model_name:
+            raise ValueError("Specify only one of 'model_path' or 'model_name'.")
+
+        if model_path:
+            self.model = YOLO(model_path)
+        else:
+            # Default to Ultralytics alias download for backwards compatibility
+            model_name = model_name or "yolov8s"
+            self.model = YOLO(model_name)
 
     def detect(self, frame_bgr: np.ndarray) -> List[Tuple[BBox, float, str]]:
         res = self.model.predict(frame_bgr, verbose=False)[0]
