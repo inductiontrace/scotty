@@ -16,3 +16,18 @@ quiddity:
 ```
 
 Swap models by changing `impl` and `model_path` in the config.
+
+Emitting all detections vs. embedding subset
+
+Quiddity (YOLOE) always evaluates all classes internally. You can emit all labels
+by leaving classes_include unset. Control compute by limiting embeddings via:
+
+haecceity:
+  embed_classes: ["person", "car"]   # only these classes get embeddings
+
+
+Specialists are instantiated only if their class is in embed_classes and any required
+model_path exists; otherwise the system logs a warning and continues without them.
+
+---
+
