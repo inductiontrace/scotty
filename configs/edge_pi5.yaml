@@ -22,9 +22,28 @@ quiddity:
   classes_include: ["person", "car"]
 
 tracker:
-  impl: "common.tracker_sort:Sort"
-  iou_th: 0.3
+  impl: "tracker.sort:SORT"
+  iou_threshold: 0.3
   max_age: 12
+  min_hits: 2
+  class_consistency:
+    enabled: true
+    penalty: 1000000
+  core_center:
+    enabled: true
+    shrink: 0.30
+  scale_gate:
+    enabled: true
+    grow_tol: 1.60
+    shrink_tol: 0.60
+  dilate_for_assoc:
+    enabled: true
+    dx: 0.15
+    dy: 0.05
+  duplicate_merge:
+    enabled: true
+    iou_thresh: 0.6
+    min_frames: 3
 
 haecceity:
   new_id_threshold: 0.55
