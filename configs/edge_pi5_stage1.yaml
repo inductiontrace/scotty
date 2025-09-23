@@ -8,4 +8,25 @@ quiddity:
   impl: "quiddity.yoloe_pt:YOLOEPT"
   model_name: "yolov8s"          # Ultralytics alias; auto-downloads on first run
   conf_th: 0.35
-  classes_include: ["person"]
+  # classes_include: ["person"]  # Emit all classes when omitted
+
+tracker:
+  impl: null
+
+haecceity:
+  new_id_threshold: 0.55
+  hysteresis: 0.05
+  min_bbox_h_frac: 0.08
+  min_sharpness: 25.0
+  embed_interval_frames: 3
+  embed_classes: ["person", "car"]
+  specialists:
+    - impl: "haecceity.person_osnet:PersonOSNet025"
+      model_path: "models/osnet_x0_25.onnx"
+      crop: 192
+    - impl: "haecceity.vehicle_signature:VehicleSignature"
+      hist_bins: 32
+  fallbacks:
+    - impl: "haecceity.generic_osnet:GenericOSNet025"
+      model_path: "models/osnet_x0_25.onnx"
+      crop: 192
