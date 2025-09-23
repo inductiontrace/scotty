@@ -1,4 +1,4 @@
-"""Shared video source utilities."""
+"""Shared video helpers for camera capture and frame conversion."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import time
 from typing import Any, Callable, Tuple
 
 import cv2
-
 
 FrameReadFn = Callable[[], Tuple[bool, Any]]
 FrameCloseFn = Callable[[], None]
@@ -18,7 +17,6 @@ def to_bgr(frame):
     if frame is None:
         return None
     if frame.ndim == 2:
-        # GRAY -> BGR
         return cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
     if frame.ndim != 3:
         raise ValueError(f"Unexpected frame ndim={frame.ndim}, expected 2 or 3.")
@@ -27,14 +25,12 @@ def to_bgr(frame):
         # Heuristic: Picamera2 default is RGB; convert to BGR for consistency.
         return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     if channels == 4:
-        # Many Pi pipelines produce XRGB/BGRA; try BGRA->BGR first.
         return cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
     raise ValueError(f"Unexpected channel count: {channels}, expected 1/3/4.")
 
 
 def open_source(src, fps):
     """Return read/close/size helpers for a camera source."""
-
     if isinstance(src, str) and src.lower() == "picam":
         try:
             from picamera2 import Picamera2
