@@ -87,6 +87,7 @@ def _build(cfg: dict):
         "embed_interval_frames": 1,
         "min_bbox_h_frac": 0.0,
         "min_sharpness": 0.0,
+        "embed_classes": [],
         "specialists": [],
         "fallbacks": [],
     }
@@ -187,6 +188,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     client, topic = _connect_mqtt(cfg["edge"].get("mqtt"))
 
     embed_interval = int(hcfg.get("embed_interval_frames", 1))
+    embed_classes = set(hcfg.get("embed_classes", []))
 
     try:
         while True:
@@ -229,24 +231,28 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 hfrac = (y2 - y1) / float(height + 1e-9)
                 quality = {"sharpness": sharp, "bbox_h_frac": hfrac}
 
-                specialist = _pick_specialist(specialists, fallbacks, track.clazz)
+                specialist = None
                 have_embed = False
-                if specialist is not None and crop.size:
-                    last_embed_frame = getattr(track, "last_embed_frame", -9999)
-                    if frame_idx - last_embed_frame >= embed_interval:
-                        try:
-                            embedding = specialist.embed(crop)
-                            embedding = embedding / (np.linalg.norm(embedding) + 1e-9)
-                            prev = getattr(track, "embed", None)
-                            if prev is not None:
-                                embedding = 0.75 * prev + 0.25 * embedding
-                                embedding /= np.linalg.norm(embedding) + 1e-9
-                            track.embed = embedding
-                            track.last_embed_frame = frame_idx
-                            track.global_id = registry.assign(track, embedding)
-                            have_embed = True
-                        except Exception as exc:  # pragma: no cover - logging path
-                            LOGGER.warning("Specialist %s failed to embed: %s", specialist, exc)
+                if track.clazz in embed_classes:
+                    specialist = _pick_specialist(specialists, fallbacks, track.clazz)
+                    if specialist is not None and crop.size:
+                        last_embed_frame = getattr(track, "last_embed_frame", -9999)
+                        if frame_idx - last_embed_frame >= embed_interval:
+                            try:
+                                embedding = specialist.embed(crop)
+                                embedding = embedding / (np.linalg.norm(embedding) + 1e-9)
+                                prev = getattr(track, "embed", None)
+                                if prev is not None:
+                                    embedding = 0.75 * prev + 0.25 * embedding
+                                    embedding /= np.linalg.norm(embedding) + 1e-9
+                                track.embed = embedding
+                                track.last_embed_frame = frame_idx
+                                track.global_id = registry.assign(track, embedding)
+                                have_embed = True
+                            except Exception as exc:  # pragma: no cover - logging path
+                                LOGGER.warning(
+                                    "Specialist %s failed to embed: %s", specialist, exc
+                                )
 
                 event = DetectionEvent(
                     ts_ms=int(time.time() * 1000),
