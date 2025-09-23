@@ -7,9 +7,13 @@ edge:
 
 output:
   video_path: "data/stage1_overlay.mp4"  # set null/empty to disable
-  fps: 5                                   # match your capture FPS
+  fps: 5                                   # target container fps (≈ loop rate)
   codec: "mp4v"                           # try "avc1" or "H264" if installed
   draw_scores: true                        # include conf score in overlay
+  draw_hud: true                           # show diagnostics overlay
+  hud_corner: "tl"                        # tl|tr|bl|br placement
+  hud_scale: 0.6                           # text scale factor
+  hud_opacity: 0.6                         # background box opacity
 
 quiddity:
   impl: "quiddity.yoloe_pt:YOLOEPT"
