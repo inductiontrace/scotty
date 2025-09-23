@@ -1,10 +1,5 @@
-numpy
-opencv-python
-onnxruntime        # keep for Stage-2/ONNX path
-paho-mqtt
+ultralytics
+onnxruntime
 pyyaml
-filterpy
-scipy
-ultralytics          # NEW (for .pt alias auto-download)
-
+paho-mqtt
 torchreid
