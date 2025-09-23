@@ -21,7 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 from common.events import DetectionEvent
 from common.loader import load_object
 from common.quality import sharpness_laplacian
-from .video_utils import open_source
+from common.video_utils import open_source
 
 BBox = Tuple[int, int, int, int]
 
