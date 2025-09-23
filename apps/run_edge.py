@@ -156,6 +156,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     logging.basicConfig(
         level=logging.INFO,
         format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
+        stream=sys.stdout,
     )
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--config", required=True, help="Path to YAML config")
@@ -265,6 +266,15 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
             for event in events:
                 line = event.to_json()
+                LOGGER.info(
+                    "Frame %d: track %d (%s) conf=%.2f bbox=%s embed=%s",
+                    event.frame,
+                    event.track_id_local,
+                    event.clazz,
+                    event.conf,
+                    event.box_xyxy,
+                    "yes" if event.have_embed else "no",
+                )
                 output.write(line + "\n")
                 if client is not None and topic is not None:
                     client.publish(topic, line, qos=0, retain=False)
