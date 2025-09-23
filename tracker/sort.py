@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import List, Tuple
 
+from common import numpy_compat  # noqa: F401  Ensures NumPy compatibility shims are applied.
 import numpy as np
 from filterpy.kalman import KalmanFilter
 
