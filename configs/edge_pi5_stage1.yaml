@@ -14,10 +14,15 @@ quiddity:
   # classes_include: ["person"]  # leave unset to emit all labels
 
 tracker:
-  impl: "tracker.sort:SORT"
-  iou_threshold: 0.3
+  impl: "tracker.db_tracker:DBTracker"
   max_age: 10
   min_hits: 2
+  center_gate_frac: 0.12
+  maha_gate_p: 0.997
+  w_center: 1.0
+  w_scale: 0.2
+  w_aspect: 0.2
+  w_app: 0.0
 
 haecceity:
   embed_classes: []  # disable embeddings
