@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import logging
 import os
 import pathlib
@@ -20,7 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from common.events import DetectionEvent
 from common.loader import load_object
-from common.overlay import draw_tracks
+from common.overlay import draw_hud, draw_tracks
 from common.quality import sharpness_laplacian
 from common.video_utils import open_source, to_bgr
 
@@ -258,12 +259,15 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "fps": float(output_cfg.get("fps", cfg["edge"].get("fps", 1.0))),
             "codec": output_cfg.get("codec", "mp4v"),
         }
-        draw_scores = bool(output_cfg.get("draw_scores", True))
         LOGGER.info("Writing annotated video to %s", video_path)
     else:
         video_writer_settings = None
-        draw_scores = False
         LOGGER.info("No video output configured")
+    draw_scores = bool(output_cfg.get("draw_scores", True))
+    draw_diag = bool(output_cfg.get("draw_hud", True))
+    hud_corner = output_cfg.get("hud_corner", "tl")
+    hud_scale = float(output_cfg.get("hud_scale", 0.6))
+    hud_opacity = float(output_cfg.get("hud_opacity", 0.6))
     video_out = None
 
     src = cfg["edge"].get("source", 0)
@@ -277,11 +281,23 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     period = 1.0 / max(0.1, fps)
     last = 0.0
     frame_idx = 0
+    fps_ema: Optional[float] = None
+    ema_alpha = 0.2
+    t_prev: Optional[float] = None
 
     client, topic = _connect_mqtt(cfg["edge"].get("mqtt"))
 
     embed_interval = int(hcfg.get("embed_interval_frames", 1))
     embed_classes = set(hcfg.get("embed_classes", []))
+
+    tracker_cfg = cfg.get("tracker", {}) or {}
+    tracker_meta = {}
+    impl = tracker_cfg.get("impl", "")
+    if impl:
+        tracker_meta["name"] = impl.split(":")[0].split(".")[-1]
+    for key in ("iou_threshold", "max_age", "min_hits", "center_gate_frac", "maha_gate_p"):
+        if key in tracker_cfg:
+            tracker_meta[key] = tracker_cfg[key]
 
     try:
         while True:
@@ -302,6 +318,16 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 continue
 
             height, width = frame_bgr.shape[:2]
+            t_now = time.time()
+            if t_prev is not None:
+                dt = max(1e-6, t_now - t_prev)
+                inst_fps = 1.0 / dt
+                fps_ema = (
+                    inst_fps
+                    if fps_ema is None
+                    else (1 - ema_alpha) * fps_ema + ema_alpha * inst_fps
+                )
+            t_prev = t_now
             if video_out is None and video_writer_settings is not None:
                 fourcc = cv2.VideoWriter_fourcc(*video_writer_settings["codec"])
                 video_out = cv2.VideoWriter(
@@ -406,6 +432,24 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     for track in tracks
                 ]
                 draw_tracks(vis, track_tuples, draw_scores=draw_scores)
+                if draw_diag:
+                    stats = {
+                        "cam_id": cam_id,
+                        "img_wh": (int(width), int(height)),
+                        "ts_str": datetime.datetime.now().strftime("%H:%M:%S"),
+                        "frame_idx": frame_idx,
+                        "fps": fps_ema or 0.0,
+                        "n_dets": len(detections),
+                        "n_tracks": len(track_tuples),
+                        "tracker": tracker_meta,
+                    }
+                    draw_hud(
+                        vis,
+                        stats,
+                        corner=hud_corner,
+                        scale=hud_scale,
+                        opacity=hud_opacity,
+                    )
                 video_out.write(vis)
 
             frame_idx += 1
