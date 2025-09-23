@@ -19,6 +19,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from common.dedup import simple_nms
 from common.events import DetectionEvent
 from common.loader import load_object
 from common.overlay import draw_hud, draw_tracks
@@ -355,6 +356,15 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     local_dets = detector.detect(crop)
                     for (bx1, by1, bx2, by2), conf, cls in local_dets:
                         detections.append(((bx1 + x1, by1 + y1, bx2 + x1, by2 + y1), conf, cls))
+
+            det_cfg = cfg.get("detector", {}) or {}
+            if not det_cfg:
+                det_cfg = cfg.get("quiddity", {}) or {}
+            dd_cfg = det_cfg.get("dedup", {}) or {}
+            if dd_cfg.get("enabled", True):
+                detections = simple_nms(
+                    detections, iou_thr=float(dd_cfg.get("iou_thr", 0.6))
+                )
 
             tracks = tracker.step(detections, (width, height))
             for diag in tracker.diagnostics():

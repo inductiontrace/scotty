@@ -22,17 +22,28 @@ quiddity:
   min_box_area_frac: 0.002
   max_box_area_frac: 0.85
   # classes_include: ["person"]  # leave unset to emit all labels
+  dedup:
+    enabled: true
+    iou_thr: 0.6
 
 tracker:
   impl: "tracker.db_tracker:DBTracker"
   max_age: 10
   min_hits: 2
-  center_gate_frac: 0.12
-  maha_gate_p: 0.997
+  center_gate_frac: 0.25
+  maha_gate_p: 0.995
   w_center: 1.0
   w_scale: 0.2
   w_aspect: 0.2
   w_app: 0.0
+  q_pos: 1.0
+  q_sz: 2.0
+  r_pos: 3.0
+  r_sz: 8.0
+  merge_dups:
+    enabled: true
+    iou_thr: 0.8
+    hold: 2
 
 haecceity:
   embed_classes: []  # disable embeddings
