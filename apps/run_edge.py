@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from common.events import DetectionEvent
 from common.loader import load_object
+from common.overlay import draw_tracks
 from common.quality import sharpness_laplacian
 from common.video_utils import open_source, to_bgr
 
@@ -248,6 +249,21 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     output = open(emit_path, "a", buffering=1, encoding="utf-8")
     LOGGER.info("Writing events to %s", emit_path)
 
+    output_cfg = cfg.get("output", {})
+    video_path = output_cfg.get("video_path")
+    if video_path:
+        pathlib.Path(os.path.dirname(video_path)).mkdir(parents=True, exist_ok=True)
+        video_writer_settings = {
+            "path": video_path,
+            "fps": float(output_cfg.get("fps", cfg["edge"].get("fps", 1.0))),
+            "codec": output_cfg.get("codec", "mp4v"),
+        }
+        draw_scores = bool(output_cfg.get("draw_scores", True))
+    else:
+        video_writer_settings = None
+        draw_scores = False
+    video_out = None
+
     src = cfg["edge"].get("source", 0)
     try:
         read_fn, close_fn, size_fn = open_source(src, cfg["edge"].get("fps", 1.0))
@@ -284,6 +300,22 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 continue
 
             height, width = frame_bgr.shape[:2]
+            if video_out is None and video_writer_settings is not None:
+                fourcc = cv2.VideoWriter_fourcc(*video_writer_settings["codec"])
+                video_out = cv2.VideoWriter(
+                    video_writer_settings["path"],
+                    fourcc,
+                    video_writer_settings["fps"],
+                    (int(width), int(height)),
+                )
+                if not video_out.isOpened():
+                    LOGGER.warning(
+                        "Failed to open video writer at %s",
+                        video_writer_settings["path"],
+                    )
+                    video_out.release()
+                    video_out = None
+                    video_writer_settings = None
             rois = intu.next_rois(frame_bgr) if intu is not None else None
 
             detections = []
@@ -365,6 +397,15 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 if client is not None and topic is not None:
                     client.publish(topic, line, qos=0, retain=False)
 
+            if video_out is not None:
+                vis = frame_bgr.copy()
+                track_tuples = [
+                    (track.id, track.box_xyxy, track.clazz, float(track.conf))
+                    for track in tracks
+                ]
+                draw_tracks(vis, track_tuples, draw_scores=draw_scores)
+                video_out.write(vis)
+
             frame_idx += 1
 
     except KeyboardInterrupt:  # pragma: no cover - interactive stop
@@ -375,6 +416,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             client.loop_stop()
             client.disconnect()
         close_fn()
+        if video_out is not None:
+            video_out.release()
         cv2.destroyAllWindows()
 
     return 0
