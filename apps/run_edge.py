@@ -21,7 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 from common.events import DetectionEvent
 from common.loader import load_object
 from common.quality import sharpness_laplacian
-from common.video_utils import open_source
+from common.video_utils import open_source, to_bgr
 
 BBox = Tuple[int, int, int, int]
 
@@ -200,15 +200,20 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 LOGGER.warning("Failed to read frame from camera; stopping.")
                 break
 
-            height, width = frame.shape[:2]
-            rois = intu.next_rois(frame) if intu is not None else None
+            frame_bgr = to_bgr(frame)
+            if frame_bgr is None:
+                LOGGER.warning("Received empty frame; skipping.")
+                continue
+
+            height, width = frame_bgr.shape[:2]
+            rois = intu.next_rois(frame_bgr) if intu is not None else None
 
             detections = []
             if rois is None:
-                detections = detector.detect(frame)
+                detections = detector.detect(frame_bgr)
             else:
                 for (x1, y1, x2, y2) in rois:
-                    crop = frame[y1:y2, x1:x2]
+                    crop = frame_bgr[y1:y2, x1:x2]
                     local_dets = detector.detect(crop)
                     for (bx1, by1, bx2, by2), conf, cls in local_dets:
                         detections.append(((bx1 + x1, by1 + y1, bx2 + x1, by2 + y1), conf, cls))
@@ -217,7 +222,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             events = []
             for track in tracks:
                 x1, y1, x2, y2 = track.box_xyxy
-                crop = frame[max(0, y1) : min(height, y2), max(0, x1) : min(width, x2)]
+                crop = frame_bgr[max(0, y1) : min(height, y2), max(0, x1) : min(width, x2)]
                 gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.size else None
                 sharp = sharpness_laplacian(gray) if gray is not None else 0.0
                 hfrac = (y2 - y1) / float(height + 1e-9)

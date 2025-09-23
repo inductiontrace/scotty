@@ -44,7 +44,9 @@ def open_source(src, fps):
             ) from exc
 
         picam = Picamera2()
-        config = picam.create_video_configuration({"size": (1280, 720)})
+        config = picam.create_video_configuration(
+            main={"format": "RGB888", "size": (1280, 720)}
+        )
         picam.configure(config)
         picam.start()
         time.sleep(0.3)
