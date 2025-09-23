@@ -9,7 +9,15 @@ quiddity:
   impl: "quiddity.yoloe_pt:YOLOEPT"
   model_name: "yolov8s"
   conf_th: 0.35
+  min_box_area_frac: 0.002
+  max_box_area_frac: 0.85
   # classes_include: ["person"]  # leave unset to emit all labels
+
+tracker:
+  impl: "tracker.sort:SORT"
+  iou_threshold: 0.3
+  max_age: 10
+  min_hits: 2
 
 haecceity:
   embed_classes: []  # disable embeddings

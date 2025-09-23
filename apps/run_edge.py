@@ -7,7 +7,7 @@ import pathlib
 import sys
 import time
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -49,6 +49,35 @@ class _PassthroughTracker:
             self._next_id += 1
         return tracks
 
+
+class _TrackerAdapter:
+    """Wraps a tracker that outputs tuples and exposes the step() API."""
+
+    def __init__(self, tracker) -> None:
+        self._tracker = tracker
+        self._states: Dict[int, _InstantTrack] = {}
+
+    def step(self, dets: List[Tuple[BBox, float, str]]) -> List[_InstantTrack]:
+        tracks: List[_InstantTrack] = []
+        seen: set[int] = set()
+        for tid, bbox, label, score in self._tracker.update(dets):
+            box_xyxy = (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
+            track = self._states.get(tid)
+            if track is None:
+                track = _InstantTrack(tid, box_xyxy, float(score), label)
+                self._states[tid] = track
+            else:
+                track.box_xyxy = box_xyxy
+            track.conf = float(score)
+            track.clazz = label
+            tracks.append(track)
+            seen.add(tid)
+
+        stale = [tid for tid in self._states if tid not in seen]
+        for tid in stale:
+            del self._states[tid]
+        return tracks
+
 LOGGER = logging.getLogger("haecceity.edge")
 logger = LOGGER
 
@@ -75,7 +104,8 @@ def _build(cfg):
     tracker = None
     if tracker_cfg and tracker_cfg.get("impl"):
         tr_impl = load_object(tracker_cfg["impl"])
-        tracker = tr_impl(**{k: v for k, v in tracker_cfg.items() if k != "impl"})
+        tracker_kwargs = {k: v for k, v in tracker_cfg.items() if k != "impl"}
+        tracker = _TrackerAdapter(tr_impl(**tracker_kwargs))
     else:
         logger.info("No tracker configured; using passthrough detections.")
 
