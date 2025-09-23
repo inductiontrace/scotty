@@ -3,7 +3,7 @@ import os, time, argparse, json, pathlib, yaml, sys
 import numpy as np
 import cv2
 
-from .video_utils import open_source, to_bgr
+from common.video_utils import open_source, to_bgr
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
