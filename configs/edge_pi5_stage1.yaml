@@ -5,6 +5,12 @@ edge:
   source: "picam"
   emit_jsonl: "data/stage1_tracks.jsonl"
 
+output:
+  video_path: "data/stage1_overlay.mp4"  # set null/empty to disable
+  fps: 5                                   # match your capture FPS
+  codec: "mp4v"                           # try "avc1" or "H264" if installed
+  draw_scores: true                        # include conf score in overlay
+
 quiddity:
   impl: "quiddity.yoloe_pt:YOLOEPT"
   model_name: "yolov8s"
