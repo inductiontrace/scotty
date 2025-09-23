@@ -21,6 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 from common.events import DetectionEvent
 from common.loader import load_object
 from common.quality import sharpness_laplacian
+from common.video import open_source
 
 BBox = Tuple[int, int, int, int]
 
@@ -49,79 +50,6 @@ class _PassthroughTracker:
         return tracks
 
 LOGGER = logging.getLogger("haecceity.edge")
-
-
-def open_source(src, fps):
-    """
-    Returns a tuple (read_fn, close_fn, size_fn)
-      - read_fn() -> (ok, frame_bgr)
-      - close_fn() -> None
-      - size_fn() -> (W, H) after first frame
-    Supports:
-      - "picam"     -> Picamera2 capture_array()
-      - int/index   -> OpenCV VideoCapture(index)
-      - path/rtsp   -> OpenCV VideoCapture(url)
-    """
-
-    if isinstance(src, str) and src.lower() == "picam":
-        try:
-            from picamera2 import Picamera2
-        except Exception as exc:
-            raise SystemExit(
-                "Picamera2 not available. Install with: sudo apt install -y python3-picamera2"
-            ) from exc
-
-        picam = Picamera2()
-        config = picam.create_video_configuration({"size": (1280, 720)})
-        picam.configure(config)
-        picam.start()
-        time.sleep(0.3)
-        first = picam.capture_array()
-        height, width = first.shape[:2]
-
-        def read_fn():
-            frame = picam.capture_array()
-            return True, frame
-
-        def close_fn():
-            try:
-                picam.stop()
-            except Exception:
-                pass
-
-        def size_fn():
-            return (width, height)
-
-        return read_fn, close_fn, size_fn
-
-    cap = cv2.VideoCapture(src)
-    if not cap.isOpened():
-        raise SystemExit(f"Could not open source: {src}")
-
-    ok, frame = cap.read()
-    if not ok:
-        cap.release()
-        raise SystemExit(f"Failed to read first frame from source: {src}")
-    height, width = frame.shape[:2]
-
-    try:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-    except Exception:
-        pass
-
-    def read_fn():
-        ok, f = cap.read()
-        return ok, f
-
-    def close_fn():
-        cap.release()
-
-    def size_fn():
-        return (width, height)
-
-    return read_fn, close_fn, size_fn
-
-
 def _instantiate_from_config(entry: dict):
     impl = entry["impl"]
     cls = load_object(impl)
