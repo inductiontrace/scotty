@@ -1,7 +1,7 @@
 # Variant A: Stage-1 (no embeddings, emit all YOLOE labels)
 edge:
   cam_id: "pi5_cam_a"
-  fps: 1.0
+  fps: 5.0
   source: "picam"
   emit_jsonl: "data/stage1_tracks.jsonl"
 

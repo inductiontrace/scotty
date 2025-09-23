@@ -259,9 +259,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             "codec": output_cfg.get("codec", "mp4v"),
         }
         draw_scores = bool(output_cfg.get("draw_scores", True))
+        LOGGER.info("Writing annotated video to %s", video_path)
     else:
         video_writer_settings = None
         draw_scores = False
+        LOGGER.info("No video output configured")
     video_out = None
 
     src = cfg["edge"].get("source", 0)
