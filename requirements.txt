@@ -4,4 +4,4 @@ onnxruntime        # keep for Stage-2/ONNX path
 paho-mqtt
 pyyaml
 filterpy
-ultralytics        # NEW (for .pt inference + retraining)
+ultralytics          # NEW (for .pt alias auto-download)
