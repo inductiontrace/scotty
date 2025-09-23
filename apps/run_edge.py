@@ -6,7 +6,8 @@ import os
 import pathlib
 import sys
 import time
-from typing import Iterable, Optional
+from dataclasses import dataclass
+from typing import Iterable, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -20,6 +21,32 @@ if str(REPO_ROOT) not in sys.path:
 from common.events import DetectionEvent
 from common.loader import load_object
 from common.quality import sharpness_laplacian
+
+BBox = Tuple[int, int, int, int]
+
+
+@dataclass
+class _InstantTrack:
+    """Lightweight track used when no tracker is configured."""
+
+    id: int
+    box_xyxy: BBox
+    conf: float
+    clazz: str
+
+
+class _PassthroughTracker:
+    """Fallback tracker that yields one track per detection."""
+
+    def __init__(self) -> None:
+        self._next_id = 1
+
+    def step(self, dets: List[Tuple[BBox, float, str]]) -> List[_InstantTrack]:
+        tracks: List[_InstantTrack] = []
+        for bbox, conf, clazz in dets:
+            tracks.append(_InstantTrack(self._next_id, bbox, conf, clazz))
+            self._next_id += 1
+        return tracks
 
 LOGGER = logging.getLogger("haecceity.edge")
 
@@ -43,28 +70,53 @@ def _build(cfg: dict):
     detector_cls = load_object(cfg["quiddity"]["impl"])
     detector = detector_cls(cfg["quiddity"])
 
-    LOGGER.info("Loading tracker: %s", cfg["tracker"]["impl"])
-    tracker_cfg = {k: v for k, v in cfg["tracker"].items() if k != "impl"}
-    tracker_cls = load_object(cfg["tracker"]["impl"])
-    tracker = tracker_cls(**tracker_cfg)
+    tracker_cfg = cfg.get("tracker")
+    if tracker_cfg and tracker_cfg.get("impl"):
+        LOGGER.info("Loading tracker: %s", tracker_cfg["impl"])
+        tracker_args = {k: v for k, v in tracker_cfg.items() if k != "impl"}
+        tracker_cls = load_object(tracker_cfg["impl"])
+        tracker = tracker_cls(**tracker_args)
+    else:
+        LOGGER.info("No tracker configured; using passthrough detections.")
+        tracker = _PassthroughTracker()
 
     from haecceity.registry import GlobalRegistry
 
+    haecceity_cfg = {
+        "new_id_threshold": 0.6,
+        "hysteresis": 0.05,
+        "embed_interval_frames": 1,
+        "min_bbox_h_frac": 0.0,
+        "min_sharpness": 0.0,
+        "specialists": [],
+        "fallbacks": [],
+    }
+    haecceity_cfg.update(cfg.get("haecceity", {}))
+
     specialists = []
-    for spec_cfg in cfg["haecceity"].get("specialists", []):
+    for spec_cfg in haecceity_cfg.get("specialists", []):
         LOGGER.info("Loading specialist: %s", spec_cfg.get("impl"))
         specialists.append(_instantiate_from_config(spec_cfg))
 
     fallbacks = []
-    for fb_cfg in cfg["haecceity"].get("fallbacks", []):
+    for fb_cfg in haecceity_cfg.get("fallbacks", []):
         LOGGER.info("Loading fallback specialist: %s", fb_cfg.get("impl"))
         fallbacks.append(_instantiate_from_config(fb_cfg))
 
     registry = GlobalRegistry(
-        cfg["haecceity"]["new_id_threshold"], cfg["haecceity"]["hysteresis"]
+        haecceity_cfg["new_id_threshold"], haecceity_cfg["hysteresis"]
     )
 
-    return cam_id, intu, detector, tracker, specialists, fallbacks, registry, cfg["haecceity"]
+    return (
+        cam_id,
+        intu,
+        detector,
+        tracker,
+        specialists,
+        fallbacks,
+        registry,
+        haecceity_cfg,
+    )
 
 
 def _pick_specialist(
