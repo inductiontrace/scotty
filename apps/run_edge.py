@@ -50,73 +50,94 @@ class _PassthroughTracker:
         return tracks
 
 LOGGER = logging.getLogger("haecceity.edge")
-def _instantiate_from_config(entry: dict):
-    impl = entry["impl"]
-    cls = load_object(impl)
+logger = LOGGER
+
+
+def _instantiate_from_config(entry):
+    cls = load_object(entry["impl"])
     return cls(entry)
 
 
-def _build(cfg: dict):
+def _build(cfg):
     cam_id = cfg["edge"]["cam_id"]
-
-    intu_cfg = cfg.get("intuitus", {})
+    # Intuitus (optional)
     intu = None
-    if intu_cfg.get("enabled"):
-        LOGGER.info("Loading ROI provider: %s", intu_cfg.get("impl"))
-        intu = _instantiate_from_config(intu_cfg)
+    if cfg.get("intuitus", {}).get("enabled", False):
+        impl = load_object(cfg["intuitus"]["impl"])
+        intu = impl(cfg["intuitus"])
 
-    LOGGER.info("Loading detector: %s", cfg["quiddity"]["impl"])
-    detector_cls = load_object(cfg["quiddity"]["impl"])
-    detector = detector_cls(cfg["quiddity"])
+    # Detector
+    det_impl = load_object(cfg["quiddity"]["impl"])
+    detector = det_impl(cfg["quiddity"])
 
-    tracker_cfg = cfg.get("tracker")
+    # Tracker (may be null)
+    tracker_cfg = cfg.get("tracker", {})
+    tracker = None
     if tracker_cfg and tracker_cfg.get("impl"):
-        LOGGER.info("Loading tracker: %s", tracker_cfg["impl"])
-        tracker_args = {k: v for k, v in tracker_cfg.items() if k != "impl"}
-        tracker_cls = load_object(tracker_cfg["impl"])
-        tracker = tracker_cls(**tracker_args)
+        tr_impl = load_object(tracker_cfg["impl"])
+        tracker = tr_impl(**{k: v for k, v in tracker_cfg.items() if k != "impl"})
     else:
-        LOGGER.info("No tracker configured; using passthrough detections.")
-        tracker = _PassthroughTracker()
+        logger.info("No tracker configured; using passthrough detections.")
 
+    # Haecceity
     from haecceity.registry import GlobalRegistry
 
-    haecceity_cfg = {
-        "new_id_threshold": 0.6,
-        "hysteresis": 0.05,
-        "embed_interval_frames": 1,
-        "min_bbox_h_frac": 0.0,
-        "min_sharpness": 0.0,
-        "embed_classes": [],
-        "specialists": [],
-        "fallbacks": [],
-    }
-    haecceity_cfg.update(cfg.get("haecceity", {}))
-
+    hcfg = cfg.get("haecceity", {})
+    embed_classes = set(hcfg.get("embed_classes", []))
     specialists = []
-    for spec_cfg in haecceity_cfg.get("specialists", []):
-        LOGGER.info("Loading specialist: %s", spec_cfg.get("impl"))
-        specialists.append(_instantiate_from_config(spec_cfg))
+    for sc in hcfg.get("specialists", []):
+        impl_path = sc.get("impl")
+        try:
+            # 1) skip if class not in allowlist (if class list is declared on class)
+            cls_type = load_object(impl_path)
+            supported = set(getattr(cls_type, "classes", []))
+            if supported and not (supported & embed_classes):
+                logger.debug(
+                    "Skipping %s (unsupported for embed_classes=%s)",
+                    impl_path,
+                    embed_classes,
+                )
+                continue
+            # 2) skip if it declares a model_path that doesn't exist
+            mp = sc.get("model_path")
+            if mp and not os.path.exists(mp):
+                logger.warning(
+                    "Skipping specialist %s: missing model_path '%s'",
+                    impl_path,
+                    mp,
+                )
+                continue
+            specialists.append(_instantiate_from_config(sc))
+            logger.info("Loading specialist: %s", impl_path)
+        except Exception as e:
+            logger.warning(
+                "Failed to instantiate specialist %s: %s. Continuing without it.",
+                impl_path,
+                e,
+            )
 
     fallbacks = []
-    for fb_cfg in haecceity_cfg.get("fallbacks", []):
-        LOGGER.info("Loading fallback specialist: %s", fb_cfg.get("impl"))
-        fallbacks.append(_instantiate_from_config(fb_cfg))
+    for fc in hcfg.get("fallbacks", []):
+        try:
+            mp = fc.get("model_path")
+            if mp and not os.path.exists(mp):
+                logger.warning(
+                    "Skipping fallback %s: missing model_path '%s'",
+                    fc["impl"],
+                    mp,
+                )
+                continue
+            fallbacks.append(_instantiate_from_config(fc))
+            logger.info("Loading fallback: %s", fc["impl"])
+        except Exception as e:
+            logger.warning(
+                "Failed to instantiate fallback %s: %s. Continuing without it.",
+                fc.get("impl"),
+                e,
+            )
 
-    registry = GlobalRegistry(
-        haecceity_cfg["new_id_threshold"], haecceity_cfg["hysteresis"]
-    )
-
-    return (
-        cam_id,
-        intu,
-        detector,
-        tracker,
-        specialists,
-        fallbacks,
-        registry,
-        haecceity_cfg,
-    )
+    reg = GlobalRegistry(hcfg.get("new_id_threshold", 0.55), hcfg.get("hysteresis", 0.05))
+    return cam_id, intu, detector, tracker, specialists, fallbacks, reg, hcfg
 
 
 def _pick_specialist(
@@ -167,6 +188,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         cfg = yaml.safe_load(fh)
 
     cam_id, intu, detector, tracker, specialists, fallbacks, registry, hcfg = _build(cfg)
+    if tracker is None:
+        tracker = _PassthroughTracker()
 
     emit_path = cfg["edge"]["emit_jsonl"]
     pathlib.Path(os.path.dirname(emit_path)).mkdir(parents=True, exist_ok=True)

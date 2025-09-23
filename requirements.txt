@@ -5,3 +5,5 @@ paho-mqtt
 pyyaml
 filterpy
 ultralytics          # NEW (for .pt alias auto-download)
+
+torchreid
