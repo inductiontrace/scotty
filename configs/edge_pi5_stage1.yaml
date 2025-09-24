@@ -38,8 +38,8 @@ tracker:
   w_app: 0.0
   q_pos: 1.0
   q_sz: 2.0
-  r_pos: 3.0
-  r_sz: 8.0
+  r_pos: 0.12
+  r_sz: 0.4
   merge_dups:
     enabled: true
     iou_thr: 0.8

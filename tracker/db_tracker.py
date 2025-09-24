@@ -69,7 +69,15 @@ def chi2_inv_4d(prob: float) -> float:
 class KfBox:
     """7D Kalman filter that mirrors SORT's state layout."""
 
-    def __init__(self, z0: np.ndarray, q_pos: float, q_sz: float, r_pos: float, r_sz: float) -> None:
+    def __init__(
+        self,
+        z0: np.ndarray,
+        q_pos: float,
+        q_sz: float,
+        r_pos: float,
+        r_sz: float,
+        img_diag: float,
+    ) -> None:
         self.kf = KalmanFilter(dim_x=7, dim_z=4)
 
         F = np.eye(7)
@@ -84,7 +92,9 @@ class KfBox:
 
         self.kf.P[4:, 4:] *= 1000.0
         self.kf.P *= 10.0
-        self.kf.R = np.diag([r_pos ** 2, r_pos ** 2, r_sz ** 2, r_sz ** 2])
+        self._r_pos = float(r_pos)
+        self._r_sz = float(r_sz)
+        self.kf.R = np.eye(4)
         Q = np.zeros((7, 7), dtype=float)
         pos_var = q_pos ** 2
         sz_var = q_sz ** 2
@@ -98,10 +108,34 @@ class KfBox:
         self.kf.Q = Q
 
         self.kf.x[:4, 0] = z0
+        self.update_measurement_noise(img_diag)
 
-    def predict(self) -> Tuple[np.ndarray, np.ndarray]:
+    def _current_dimensions(self) -> Tuple[float, float]:
+        s = max(1e-6, float(self.kf.x[2, 0]))
+        r = max(1e-6, float(self.kf.x[3, 0]))
+        w = sqrt(max(1e-9, s * r))
+        h = s / max(w, 1e-6)
+        return w, h
+
+    def update_measurement_noise(self, img_diag: float) -> np.ndarray:
+        diag = max(1e-6, float(img_diag))
+        w, h = self._current_dimensions()
+        extent = max(diag, sqrt(w * w + h * h))
+        pos_sigma = max(1e-6, self._r_pos * extent)
+        s = max(1e-6, float(self.kf.x[2, 0]))
+        r = max(1e-6, float(self.kf.x[3, 0]))
+        scale_sigma = max(1e-6, self._r_sz * s)
+        aspect_sigma = max(1e-6, self._r_sz * r)
+        noise = np.diag(
+            [pos_sigma ** 2, pos_sigma ** 2, scale_sigma ** 2, aspect_sigma ** 2]
+        )
+        self.kf.R = noise
+        return noise
+
+    def predict(self, img_diag: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         self.kf.predict()
-        return self.kf.x[:4, 0].copy(), self.kf.P.copy()
+        noise = self.update_measurement_noise(img_diag)
+        return self.kf.x[:4, 0].copy(), self.kf.P.copy(), noise
 
     def update(self, z: np.ndarray) -> None:
         self.kf.update(z)
@@ -127,16 +161,22 @@ class Track:
 
     @classmethod
     def from_detection(
-        cls, bbox: BBox, label: str, score: float, next_id: int, kf_params: dict
+        cls,
+        bbox: BBox,
+        label: str,
+        score: float,
+        next_id: int,
+        img_diag: float,
+        kf_params: dict,
     ) -> "Track":
         z0 = xyxy_to_cxysr(bbox)
-        kf = KfBox(z0, **kf_params)
+        kf = KfBox(z0, img_diag=img_diag, **kf_params)
         return cls(bbox, label, score, next_id, 1, 0, kf)
 
-    def predict(self) -> Tuple[np.ndarray, np.ndarray]:
-        z, cov = self.kf.predict()
+    def predict(self, img_diag: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        z, cov, noise = self.kf.predict(img_diag)
         self.bbox = cxysr_to_xyxy(z)
-        return z, cov
+        return z, cov, noise
 
     def update(self, bbox: BBox, label: str, score: float) -> None:
         z = xyxy_to_cxysr(bbox)
@@ -164,8 +204,8 @@ class DBTracker:
         w_app: float = 0.0,
         q_pos: float = 1.0,
         q_sz: float = 2.0,
-        r_pos: float = 3.0,
-        r_sz: float = 8.0,
+        r_pos: float = 0.12,
+        r_sz: float = 0.4,
         merge_dups: Optional[dict] = None,
     ) -> None:
         del iou_threshold  # parity with SORT config but unused
@@ -186,14 +226,6 @@ class DBTracker:
             "r_pos": float(r_pos),
             "r_sz": float(r_sz),
         }
-        self._measurement_noise = np.diag(
-            [
-                self._kf_params["r_pos"] ** 2,
-                self._kf_params["r_pos"] ** 2,
-                self._kf_params["r_sz"] ** 2,
-                self._kf_params["r_sz"] ** 2,
-            ]
-        )
 
         md_cfg = merge_dups or {}
         self._merge_dups_enabled = bool(md_cfg.get("enabled", True))
@@ -220,6 +252,7 @@ class DBTracker:
         predictions: np.ndarray,
         covariances: List[np.ndarray],
         track_ids: Sequence[int],
+        measurement_noises: Sequence[np.ndarray],
     ) -> np.ndarray:
         num_dets = len(detections)
         num_trks = predictions.shape[0]
@@ -232,8 +265,10 @@ class DBTracker:
 
         det_measurements = np.stack([xyxy_to_cxysr(det[0]) for det in detections], axis=0)
 
-        for trk_idx, (pred, cov, track_id) in enumerate(zip(predictions, covariances, track_ids)):
-            innovation_cov = cov[:4, :4] + self._measurement_noise
+        for trk_idx, (pred, cov, track_id, meas_noise) in enumerate(
+            zip(predictions, covariances, track_ids, measurement_noises)
+        ):
+            innovation_cov = cov[:4, :4] + meas_noise
             try:
                 inv_cov = np.linalg.inv(innovation_cov)
             except np.linalg.LinAlgError:
@@ -291,18 +326,22 @@ class DBTracker:
         predictions: List[np.ndarray] = []
         covariances: List[np.ndarray] = []
         track_ids: List[int] = []
+        measurement_noises: List[np.ndarray] = []
         for track in self._tracks:
-            pred, cov = track.predict()
+            pred, cov, meas_noise = track.predict(self._img_diag)
             predictions.append(pred)
             covariances.append(cov)
             track_ids.append(track.id)
+            measurement_noises.append(meas_noise)
 
         if predictions:
             pred_arr = np.stack(predictions, axis=0)
         else:
             pred_arr = np.zeros((0, 4), dtype=float)
 
-        cost_matrix = self._prepare_measurements(detections, pred_arr, covariances, track_ids)
+        cost_matrix = self._prepare_measurements(
+            detections, pred_arr, covariances, track_ids, measurement_noises
+        )
 
         assigned_det_indices: set[int] = set()
         assigned_trk_indices: set[int] = set()
@@ -336,7 +375,9 @@ class DBTracker:
                 continue
             bbox, score, label = det
             self._tracks.append(
-                Track.from_detection(bbox, label, score, self._next_id, self._kf_params)
+                Track.from_detection(
+                    bbox, label, score, self._next_id, self._img_diag, self._kf_params
+                )
             )
             self._next_id += 1
 
