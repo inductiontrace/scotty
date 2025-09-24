@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import datetime
 import logging
 import os
@@ -9,6 +10,9 @@ import sys
 import time
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
+
+import shlex
+import subprocess
 
 import cv2
 import numpy as np
@@ -110,6 +114,17 @@ logger = LOGGER
 def _instantiate_from_config(entry):
     cls = load_object(entry["impl"])
     return cls(entry)
+
+
+def _default_zmq_bind(endpoint: str) -> str:
+    """Return a tcp:// bind endpoint for a tcp:// connect endpoint."""
+
+    if endpoint.startswith("tcp://"):
+        host_port = endpoint[len("tcp://") :]
+        if ":" in host_port:
+            _, port = host_port.rsplit(":", 1)
+            return f"tcp://*:{port}"
+    return endpoint
 
 
 def _build(cfg):
@@ -278,8 +293,52 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     frame_iter = None
     close_fn = lambda: None
 
+    hub_proc: Optional[subprocess.Popen] = None
+    zmq_frames_seen = 0
+
     if use_zmq:
         endpoint = source_cfg.get("endpoint", "tcp://127.0.0.1:5555")
+        bind_endpoint = source_cfg.get("bind", _default_zmq_bind(endpoint))
+        publisher_cfg = source_cfg.get("publisher", {}) or {}
+        hub_source = str(publisher_cfg.get("source", "picam"))
+        hub_fps = float(publisher_cfg.get("fps", edge_cfg.get("fps", 5.0)))
+        hub_cam_id = str(publisher_cfg.get("camera_id", edge_cfg.get("cam_id", "cam")))
+        hub_loop = bool(publisher_cfg.get("loop", False))
+
+        hub_cmd = [
+            sys.executable,
+            "-m",
+            "framebus.hub",
+            "--endpoint",
+            str(bind_endpoint),
+            "--source",
+            hub_source,
+            "--fps",
+            str(hub_fps),
+            "--camera-id",
+            hub_cam_id,
+        ]
+        if hub_loop:
+            hub_cmd.append("--loop")
+
+        LOGGER.info("Starting FrameBus hub: %s", " ".join(shlex.quote(arg) for arg in hub_cmd))
+        try:
+            hub_proc = subprocess.Popen(hub_cmd)
+        except OSError as exc:
+            LOGGER.error("Failed to launch FrameBus hub: %s", exc)
+            return 1
+
+        def _stop_hub() -> None:
+            if hub_proc is not None and hub_proc.poll() is None:
+                LOGGER.debug("Stopping FrameBus hub (atexit).")
+                hub_proc.terminate()
+                try:
+                    hub_proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    hub_proc.kill()
+
+        atexit.register(_stop_hub)
+
         LOGGER.info("Connecting to FrameBus at %s", endpoint)
         from framebus.reader import ZmqFrameReader
 
@@ -323,6 +382,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     try:
         while True:
             frame_ts = None
+            if use_zmq and hub_proc is not None and hub_proc.poll() is not None:
+                LOGGER.error(
+                    "FrameBus hub exited unexpectedly with code %s", hub_proc.returncode
+                )
+                break
             if use_zmq:
                 if frame_iter is None:
                     LOGGER.error("Frame iterator unavailable for ZMQ source.")
@@ -343,6 +407,19 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     frame_idx += 1
                 if frame_ts is None:
                     frame_ts = time.time()
+                zmq_frames_seen += 1
+                if zmq_frames_seen == 1:
+                    LOGGER.info(
+                        "FrameBus stream connected at %s (frame_idx=%d).",
+                        endpoint,
+                        frame_idx,
+                    )
+                elif zmq_frames_seen % 10 == 0:
+                    LOGGER.info(
+                        "FrameBus processed %d frames (last frame_idx=%d).",
+                        zmq_frames_seen,
+                        frame_idx,
+                    )
             else:
                 now = time.time()
                 if now - last < period:
@@ -525,6 +602,13 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 close_fn()
             except Exception:  # pragma: no cover - best effort cleanup
                 pass
+        if hub_proc is not None and hub_proc.poll() is None:
+            LOGGER.debug("Stopping FrameBus hub (finalize).")
+            hub_proc.terminate()
+            try:
+                hub_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                hub_proc.kill()
         if video_out is not None:
             video_out.release()
         cv2.destroyAllWindows()
