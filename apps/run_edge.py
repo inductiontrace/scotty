@@ -271,20 +271,40 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     hud_opacity = float(output_cfg.get("hud_opacity", 0.6))
     video_out = None
 
-    src = cfg["edge"].get("source", 0)
-    try:
-        read_fn, close_fn, size_fn = open_source(src, cfg["edge"].get("fps", 1.0))
-    except SystemExit as exc:
-        LOGGER.error(str(exc))
-        return 1
+    edge_cfg = cfg["edge"]
+    source_cfg = edge_cfg.get("source", {})
+    use_zmq = isinstance(source_cfg, dict) and source_cfg.get("kind") == "zmq"
+    read_fn = None
+    frame_iter = None
+    close_fn = lambda: None
 
-    fps = float(cfg["edge"].get("fps", 1.0))
-    period = 1.0 / max(0.1, fps)
+    if use_zmq:
+        endpoint = source_cfg.get("endpoint", "tcp://127.0.0.1:5555")
+        LOGGER.info("Connecting to FrameBus at %s", endpoint)
+        from framebus.reader import ZmqFrameReader
+
+        reader = ZmqFrameReader(endpoint=endpoint)
+        frame_iter = iter(reader)
+        close_fn = getattr(reader, "close", lambda: None)
+    else:
+        if isinstance(source_cfg, dict):
+            src = source_cfg.get("device", source_cfg.get("path", 0))
+        else:
+            src = source_cfg if source_cfg not in (None, {}) else 0
+        try:
+            read_fn, close_fn, _ = open_source(src, edge_cfg.get("fps", 1.0))
+        except SystemExit as exc:
+            LOGGER.error(str(exc))
+            return 1
+
+    fps = float(edge_cfg.get("fps", 1.0))
+    period = 0.0 if use_zmq else 1.0 / max(0.1, fps)
     last = 0.0
-    frame_idx = 0
+    frame_idx = -1
     fps_ema: Optional[float] = None
     ema_alpha = 0.2
     t_prev: Optional[float] = None
+    frame_ts: Optional[float] = None
 
     client, topic = _connect_mqtt(cfg["edge"].get("mqtt"))
 
@@ -302,21 +322,49 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     try:
         while True:
-            now = time.time()
-            if now - last < period:
-                time.sleep(0.002)
-                continue
-            last = now
+            frame_ts = None
+            if use_zmq:
+                if frame_iter is None:
+                    LOGGER.error("Frame iterator unavailable for ZMQ source.")
+                    break
+                try:
+                    frame_bgr, meta = next(frame_iter)
+                except StopIteration:
+                    LOGGER.info("Frame stream ended; stopping.")
+                    break
+                if frame_bgr is None:
+                    LOGGER.warning("Received empty frame from bus; skipping.")
+                    continue
+                frame_ts = meta.get("ts")
+                frame_id_meta = meta.get("frame_id")
+                if frame_id_meta is not None:
+                    frame_idx = int(frame_id_meta)
+                else:
+                    frame_idx += 1
+                if frame_ts is None:
+                    frame_ts = time.time()
+            else:
+                now = time.time()
+                if now - last < period:
+                    time.sleep(0.002)
+                    continue
+                last = now
 
-            ok, frame = read_fn()
-            if not ok:
-                LOGGER.warning("Failed to read frame from camera; stopping.")
-                break
+                if read_fn is None:
+                    LOGGER.error("No frame reader configured for camera source.")
+                    break
+                ok, frame = read_fn()
+                if not ok:
+                    LOGGER.warning("Failed to read frame from camera; stopping.")
+                    break
 
-            frame_bgr = to_bgr(frame)
-            if frame_bgr is None:
-                LOGGER.warning("Received empty frame; skipping.")
-                continue
+                frame_bgr = to_bgr(frame)
+                if frame_bgr is None:
+                    LOGGER.warning("Received empty frame; skipping.")
+                    continue
+                frame_ts = now
+                frame_idx += 1
+                meta = {}
 
             height, width = frame_bgr.shape[:2]
             t_now = time.time()
@@ -405,7 +453,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                                 )
 
                 event = DetectionEvent(
-                    ts_ms=int(time.time() * 1000),
+                    ts_ms=int((frame_ts or time.time()) * 1000),
                     cam_id=cam_id,
                     frame=frame_idx,
                     track_id_local=track.id,
@@ -423,8 +471,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             for event in events:
                 line = event.to_json()
                 LOGGER.info(
-                    "Frame %d: track %d (%s) conf=%.2f bbox=%s embed=%s",
+                    "Frame %d @ %dms: track %d (%s) conf=%.2f bbox=%s embed=%s",
                     event.frame,
+                    event.ts_ms,
                     event.track_id_local,
                     event.clazz,
                     event.conf,
@@ -446,7 +495,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     stats = {
                         "cam_id": cam_id,
                         "img_wh": (int(width), int(height)),
-                        "ts_str": datetime.datetime.now().strftime("%H:%M:%S"),
+                        "ts_str": datetime.datetime.fromtimestamp(
+                            frame_ts or time.time()
+                        ).strftime("%H:%M:%S"),
                         "frame_idx": frame_idx,
                         "fps": fps_ema or 0.0,
                         "n_dets": len(detections),
@@ -462,8 +513,6 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     )
                 video_out.write(vis)
 
-            frame_idx += 1
-
     except KeyboardInterrupt:  # pragma: no cover - interactive stop
         LOGGER.info("Stopping edge loop (keyboard interrupt).")
     finally:
@@ -471,7 +520,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         if client is not None:
             client.loop_stop()
             client.disconnect()
-        close_fn()
+        if close_fn is not None:
+            try:
+                close_fn()
+            except Exception:  # pragma: no cover - best effort cleanup
+                pass
         if video_out is not None:
             video_out.release()
         cv2.destroyAllWindows()
