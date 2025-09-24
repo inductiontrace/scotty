@@ -9,8 +9,18 @@ Single producer (camera) → many consumers via ZeroMQ.
 ## Start the publisher
 ```
 . venv/bin/activate
-python3 -m framebus.hub
+# Picamera2 on-device
+python3 -m framebus.hub --source picam
+
+# OR stream a video/file/webcam when developing on a laptop
+python3 -m framebus.hub --source /path/to/video.mp4 --loop
 ```
+
+Other useful options:
+
+- `--endpoint tcp://*:5555` – change the bind address/port.
+- `--camera-id my_cam` – override the camera identifier stamped into metadata.
+- `--fps 5` – throttle publish rate (set `0` to disable throttling).
 
 ## Start an edge consumer
 ```
