@@ -2,7 +2,9 @@
 edge:
   cam_id: "pi5_cam_a"
   fps: 5.0
-  source: "picam"
+  source:
+    kind: zmq
+    endpoint: tcp://127.0.0.1:5555
   emit_jsonl: "data/stage1_tracks.jsonl"
 
 output:

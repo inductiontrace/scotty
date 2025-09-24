@@ -3,3 +3,5 @@ onnxruntime
 pyyaml
 paho-mqtt
 torchreid
+pyzmq>=26.0.0
+imagezmq>=1.1.1
