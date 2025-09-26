@@ -6,6 +6,12 @@ edge:
     kind: zmq
     endpoint: tcp://127.0.0.1:5555
   emit_jsonl: "data/stage1_tracks.jsonl"
+  web:
+    enabled: true
+    host: "0.0.0.0"
+    port: 8080
+    title: "Stage1 live"
+    jpeg_quality: 80
 
 output:
   video_path: "data/stage1_overlay.mp4"  # set null/empty to disable
