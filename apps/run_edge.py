@@ -29,6 +29,7 @@ from common.loader import load_object
 from common.overlay import draw_hud, draw_tracks
 from common.quality import sharpness_laplacian
 from common.video_utils import open_source, to_bgr
+from common.webviewer import WebViewer
 
 BBox = Tuple[int, int, int, int]
 
@@ -285,6 +286,25 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     hud_scale = float(output_cfg.get("hud_scale", 0.6))
     hud_opacity = float(output_cfg.get("hud_opacity", 0.6))
     video_out = None
+
+    web_cfg = edge_cfg.get("web", {}) or {}
+    web_viewer: Optional[WebViewer] = None
+    if web_cfg.get("enabled", False):
+        host = str(web_cfg.get("host", "0.0.0.0"))
+        port = int(web_cfg.get("port", 8080))
+        title = str(web_cfg.get("title") or f"{cam_id} live")
+        jpeg_quality = int(web_cfg.get("jpeg_quality", 80))
+        try:
+            web_viewer = WebViewer(
+                host=host, port=port, title=title, jpeg_quality=jpeg_quality
+            )
+        except OSError as exc:
+            LOGGER.error("Failed to start web viewer: %s", exc)
+            web_viewer = None
+        else:
+            LOGGER.info("Web viewer enabled at http://%s:%d/", host, port)
+    else:
+        LOGGER.info("Web viewer disabled")
 
     edge_cfg = cfg["edge"]
     source_cfg = edge_cfg.get("source", {})
@@ -561,7 +581,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 if client is not None and topic is not None:
                     client.publish(topic, line, qos=0, retain=False)
 
-            if video_out is not None:
+            need_vis = (video_out is not None) or (web_viewer is not None)
+            if need_vis:
                 vis = frame_bgr.copy()
                 track_tuples = [
                     (track.id, track.box_xyxy, track.clazz, float(track.conf))
@@ -588,7 +609,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         scale=hud_scale,
                         opacity=hud_opacity,
                     )
-                video_out.write(vis)
+                if video_out is not None:
+                    video_out.write(vis)
+                if web_viewer is not None:
+                    web_viewer.publish(vis)
 
     except KeyboardInterrupt:  # pragma: no cover - interactive stop
         LOGGER.info("Stopping edge loop (keyboard interrupt).")
@@ -611,6 +635,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 hub_proc.kill()
         if video_out is not None:
             video_out.release()
+        if web_viewer is not None:
+            web_viewer.close()
         cv2.destroyAllWindows()
 
     return 0

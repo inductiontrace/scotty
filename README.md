@@ -46,6 +46,22 @@ recorder, analytics, etc.). Switch back to a direct camera feed by setting
 `source.kind: camera` in your config. Override the bind address by setting
 `source.bind` (defaults to `tcp://*:<port>` based on the consumer endpoint).
 
+## Live web viewer
+Enable the lightweight MJPEG viewer to see the same overlay that is written to
+MP4 files. Toggle it via the `edge.web` block in your YAML config:
+
+```yaml
+edge:
+  web:
+    enabled: true
+    host: 0.0.0.0   # bind address for the HTTP server
+    port: 8080      # open http://<host>:8080/ in your browser
+    title: "pi5_cam_a live"
+```
+
+Every frame published to the viewer is annotated with bounding boxes and the
+HUD (if enabled) before being encoded as JPEG for streaming.
+
 ## Repository layout
 - `intuitus/`    – optional motion/ROI gating modules
 - `quiddity/`    – detectors/classifiers

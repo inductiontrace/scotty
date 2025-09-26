@@ -3,6 +3,12 @@ edge:
   fps: 1.0
   emit_jsonl: "data/tracks.jsonl"
   mqtt: null  # e.g., "mqtts://user:pass@host:8883/topic"
+  web:
+    enabled: true
+    host: "0.0.0.0"
+    port: 8080
+    title: "pi5_cam_a live"
+    jpeg_quality: 80
 
 intuitus:
   enabled: true
