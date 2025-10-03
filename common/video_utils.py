@@ -72,8 +72,13 @@ def open_source(src, fps):
     if not cap.isOpened():
         raise SystemExit(f"Could not open source: {src}")
 
+    deadline = time.time() + 2.0
     ok, frame = cap.read()
-    if not ok:
+    while (not ok or frame is None) and time.time() < deadline:
+        time.sleep(0.05)
+        ok, frame = cap.read()
+
+    if not ok or frame is None:
         cap.release()
         raise SystemExit(f"Failed to read first frame from source: {src}")
     height, width = frame.shape[:2]
