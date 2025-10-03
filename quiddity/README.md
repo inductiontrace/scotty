@@ -33,8 +33,8 @@ model_path exists; otherwise the system logs a warning and continues without the
 
 ### Size gates only
 
-When relying on temporal durability from tracking, configure global size gates to drop
-tiny flashes and near-full-frame boxes:
+For classification-only deployments, configure global size gates to drop tiny flashes
+and near-full-frame boxes:
 
 ```yaml
 quiddity:

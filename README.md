@@ -2,7 +2,7 @@
 
 A Raspberry Pi–friendly, modular pipeline:
   camera → (Intuitus: optional ROI gate) → (Quiddity: detector/classifier)
-         → tracker → (Haecceity: per-class ID specialists) → events (JSONL/MQTT)
+         → (Haecceity: per-class ID specialists) → events (JSONL/MQTT)
 
 ## Design goals
 - **Config-first**: swap models and modules via YAML.
@@ -65,7 +65,7 @@ HUD (if enabled) before being encoded as JPEG for streaming.
 ## Repository layout
 - `intuitus/`    – optional motion/ROI gating modules
 - `quiddity/`    – detectors/classifiers
-- `haecceity/`   – ID specialists + global registry
+- `haecceity/`   – ID specialists and embedding helpers
 - `common/`      – interfaces, events schema, loader utilities
 - `apps/`        – runnable entrypoints
 - `configs/`     – YAML config sets

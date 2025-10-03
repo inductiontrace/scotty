@@ -1,18 +1,14 @@
-# Haecceity — per-class identity specialists + global ID registry
+# Haecceity — per-class identity specialists
 
 ## Protocol
-- **Input**: tracked detections with class labels + crops from frame.
-- **Output**: (optional) embeddings per track and a stable `global_id` assigned via
-  similarity to class-specific centroids with hysteresis.
+- **Input**: detections with class labels plus crops from the frame.
+- **Output**: optional embeddings per detection for downstream analytics.
 
 ## Config keys (example)
 ```yaml
 haecceity:
-  new_id_threshold: 0.55
-  hysteresis: 0.05
   min_bbox_h_frac: 0.08
   min_sharpness: 25.0
-  embed_interval_frames: 3
   specialists:
     - impl: "haecceity.person_osnet:PersonOSNet025"
       model_path: "models/osnet_x0_25.onnx"
@@ -36,7 +32,7 @@ Write specialists that implement `common.interfaces.IdSpecialist`.
 
 **What does it output?**
 - A fixed-length, L2-normalized embedding vector (np.float32) for each qualifying person crop.
-- Haecceity’s registry uses cosine similarity + hysteresis to assign a stable `global_id`.
+- Downstream consumers can compare embeddings directly via cosine similarity.
 
 **How to enable / disable**
 - Enable by adding the specialist to `haecceity.specialists` and include `"person"` in `haecceity.embed_classes`.
@@ -53,9 +49,6 @@ Example config (enable person embeddings via torchreid):
 ```
 haecceity:
   embed_classes: ["person"]     # only embed for persons
-  new_id_threshold: 0.55
-  hysteresis: 0.05
-  embed_interval_frames: 3
 
   specialists:
     - impl: "haecceity.person_torchreid:PersonTorchreid"

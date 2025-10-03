@@ -9,7 +9,7 @@ import pathlib
 import sys
 import time
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 import shlex
 import subprocess
@@ -26,7 +26,7 @@ if str(REPO_ROOT) not in sys.path:
 from common.dedup import simple_nms
 from common.events import DetectionEvent
 from common.loader import load_object
-from common.overlay import draw_hud, draw_tracks
+from common.overlay import draw_detections, draw_hud
 from common.quality import sharpness_laplacian
 from common.video_utils import open_source, to_bgr
 from common.webviewer import WebViewer
@@ -35,78 +35,13 @@ BBox = Tuple[int, int, int, int]
 
 
 @dataclass
-class _InstantTrack:
-    """Lightweight track used when no tracker is configured."""
+class _InstantDetection:
+    """Lightweight detection used for event enrichment and overlays."""
 
     id: int
     box_xyxy: BBox
     conf: float
     clazz: str
-
-
-class _PassthroughTracker:
-    """Fallback tracker that yields one track per detection."""
-
-    def __init__(self) -> None:
-        self._next_id = 1
-
-    def step(
-        self, dets: List[Tuple[BBox, float, str]], _img_size: Tuple[int, int]
-    ) -> List[_InstantTrack]:
-        tracks: List[_InstantTrack] = []
-        for bbox, conf, clazz in dets:
-            tracks.append(_InstantTrack(self._next_id, bbox, conf, clazz))
-            self._next_id += 1
-        return tracks
-
-    def diagnostics(self) -> List[str]:
-        return []
-
-
-class _TrackerAdapter:
-    """Wraps a tracker that outputs tuples and exposes the step() API."""
-
-    def __init__(self, tracker) -> None:
-        self._tracker = tracker
-        self._states: Dict[int, _InstantTrack] = {}
-        self._last_diag: List[str] = []
-
-    def step(
-        self, dets: List[Tuple[BBox, float, str]], img_size: Tuple[int, int]
-    ) -> List[_InstantTrack]:
-        tracks: List[_InstantTrack] = []
-        seen: set[int] = set()
-        try:
-            raw_tracks = self._tracker.update(dets, img_size)
-        except TypeError:
-            raw_tracks = self._tracker.update(dets)
-
-        diag_fn = getattr(self._tracker, "consume_diagnostics", None)
-        if callable(diag_fn):
-            self._last_diag = list(diag_fn())
-        else:
-            self._last_diag = []
-
-        for tid, bbox, label, score in raw_tracks:
-            box_xyxy = (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
-            track = self._states.get(tid)
-            if track is None:
-                track = _InstantTrack(tid, box_xyxy, float(score), label)
-                self._states[tid] = track
-            else:
-                track.box_xyxy = box_xyxy
-            track.conf = float(score)
-            track.clazz = label
-            tracks.append(track)
-            seen.add(tid)
-
-        stale = [tid for tid in self._states if tid not in seen]
-        for tid in stale:
-            del self._states[tid]
-        return tracks
-
-    def diagnostics(self) -> List[str]:
-        return list(self._last_diag)
 
 LOGGER = logging.getLogger("haecceity.edge")
 logger = LOGGER
@@ -140,19 +75,7 @@ def _build(cfg):
     det_impl = load_object(cfg["quiddity"]["impl"])
     detector = det_impl(cfg["quiddity"])
 
-    # Tracker (may be null)
-    tracker_cfg = cfg.get("tracker", {})
-    tracker = None
-    if tracker_cfg and tracker_cfg.get("impl"):
-        tr_impl = load_object(tracker_cfg["impl"])
-        tracker_kwargs = {k: v for k, v in tracker_cfg.items() if k != "impl"}
-        tracker = _TrackerAdapter(tr_impl(**tracker_kwargs))
-    else:
-        logger.info("No tracker configured; using passthrough detections.")
-
     # Haecceity
-    from haecceity.registry import GlobalRegistry
-
     hcfg = cfg.get("haecceity", {})
     embed_classes = set(hcfg.get("embed_classes", []))
     specialists = []
@@ -207,8 +130,7 @@ def _build(cfg):
                 e,
             )
 
-    reg = GlobalRegistry(hcfg.get("new_id_threshold", 0.55), hcfg.get("hysteresis", 0.05))
-    return cam_id, intu, detector, tracker, specialists, fallbacks, reg, hcfg
+    return cam_id, intu, detector, specialists, fallbacks, embed_classes
 
 
 def _pick_specialist(
@@ -229,7 +151,7 @@ def _connect_mqtt(url: Optional[str]):
     import urllib.parse as up
 
     parsed = up.urlparse(url)
-    topic = parsed.path.lstrip("/") or "tracks"
+    topic = parsed.path.lstrip("/") or "detections"
     client = mqtt.Client()
     if parsed.scheme.startswith("mqtts"):
         client.tls_set()
@@ -258,9 +180,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     with open(args.config, "r", encoding="utf-8") as fh:
         cfg = yaml.safe_load(fh)
 
-    cam_id, intu, detector, tracker, specialists, fallbacks, registry, hcfg = _build(cfg)
-    if tracker is None:
-        tracker = _PassthroughTracker()
+    cam_id, intu, detector, specialists, fallbacks, embed_classes = _build(cfg)
+
+    edge_cfg = cfg["edge"]
 
     emit_path = cfg["edge"]["emit_jsonl"]
     pathlib.Path(os.path.dirname(emit_path)).mkdir(parents=True, exist_ok=True)
@@ -306,7 +228,6 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     else:
         LOGGER.info("Web viewer disabled")
 
-    edge_cfg = cfg["edge"]
     source_cfg = edge_cfg.get("source", {})
     use_zmq = isinstance(source_cfg, dict) and source_cfg.get("kind") == "zmq"
     read_fn = None
@@ -387,17 +308,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     client, topic = _connect_mqtt(cfg["edge"].get("mqtt"))
 
-    embed_interval = int(hcfg.get("embed_interval_frames", 1))
-    embed_classes = set(hcfg.get("embed_classes", []))
-
-    tracker_cfg = cfg.get("tracker", {}) or {}
-    tracker_meta = {}
-    impl = tracker_cfg.get("impl", "")
-    if impl:
-        tracker_meta["name"] = impl.split(":")[0].split(".")[-1]
-    for key in ("iou_threshold", "max_age", "min_hits", "center_gate_frac", "maha_gate_p"):
-        if key in tracker_cfg:
-            tracker_meta[key] = tracker_cfg[key]
+    embed_classes = set(embed_classes)
+    next_detection_id = 1
 
     try:
         while True:
@@ -492,7 +404,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     video_writer_settings = None
             rois = intu.next_rois(frame_bgr) if intu is not None else None
 
-            detections = []
+            detections: List[Tuple[BBox, float, str]] = []
             if rois is None:
                 detections = detector.detect(frame_bgr)
             else:
@@ -511,15 +423,16 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     detections, iou_thr=float(dd_cfg.get("iou_thr", 0.6))
                 )
 
-            tracks = tracker.step(detections, (width, height))
-            for diag in tracker.diagnostics():
-                if "REJECT" in diag:
-                    LOGGER.info("Assoc: %s", diag)
-                else:
-                    LOGGER.debug("Assoc: %s", diag)
+            observations: List[_InstantDetection] = []
+            for bbox, conf, clazz in detections:
+                observations.append(
+                    _InstantDetection(next_detection_id, bbox, float(conf), clazz)
+                )
+                next_detection_id += 1
+
             events = []
-            for track in tracks:
-                x1, y1, x2, y2 = track.box_xyxy
+            for det in observations:
+                x1, y1, x2, y2 = det.box_xyxy
                 crop = frame_bgr[max(0, y1) : min(height, y2), max(0, x1) : min(width, x2)]
                 gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.size else None
                 sharp = sharpness_laplacian(gray) if gray is not None else 0.0
@@ -528,50 +441,47 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
                 specialist = None
                 have_embed = False
-                if track.clazz in embed_classes:
-                    specialist = _pick_specialist(specialists, fallbacks, track.clazz)
+                embedding_vec: Optional[List[float]] = None
+                if det.clazz in embed_classes:
+                    specialist = _pick_specialist(specialists, fallbacks, det.clazz)
                     if specialist is not None and crop.size:
-                        last_embed_frame = getattr(track, "last_embed_frame", -9999)
-                        if frame_idx - last_embed_frame >= embed_interval:
-                            try:
+                        try:
+                            if specialist.wants(det.conf, det.box_xyxy, quality):
                                 embedding = specialist.embed(crop)
                                 embedding = embedding / (np.linalg.norm(embedding) + 1e-9)
-                                prev = getattr(track, "embed", None)
-                                if prev is not None:
-                                    embedding = 0.75 * prev + 0.25 * embedding
-                                    embedding /= np.linalg.norm(embedding) + 1e-9
-                                track.embed = embedding
-                                track.last_embed_frame = frame_idx
-                                track.global_id = registry.assign(track, embedding)
+                                if hasattr(embedding, "astype"):
+                                    embedding_vec = embedding.astype(float).tolist()
+                                else:
+                                    embedding_vec = list(embedding)
                                 have_embed = True
-                            except Exception as exc:  # pragma: no cover - logging path
-                                LOGGER.warning(
-                                    "Specialist %s failed to embed: %s", specialist, exc
-                                )
+                        except Exception as exc:  # pragma: no cover - logging path
+                            LOGGER.warning(
+                                "Specialist %s failed to embed: %s", specialist, exc
+                            )
 
                 event = DetectionEvent(
                     ts_ms=int((frame_ts or time.time()) * 1000),
                     cam_id=cam_id,
                     frame=frame_idx,
-                    track_id_local=track.id,
-                    global_id=getattr(track, "global_id", None),
-                    clazz=track.clazz,
-                    conf=float(track.conf),
+                    detection_id=det.id,
+                    clazz=det.clazz,
+                    conf=float(det.conf),
                     box_xyxy=(int(x1), int(y1), int(x2), int(y2)),
                     img_wh=(int(width), int(height)),
                     have_embed=have_embed,
                     specialist=getattr(specialist, "name", None) if specialist else None,
                     quality=quality,
+                    embedding=embedding_vec,
                 )
                 events.append(event)
 
             for event in events:
                 line = event.to_json()
                 LOGGER.info(
-                    "Frame %d @ %dms: track %d (%s) conf=%.2f bbox=%s embed=%s",
+                    "Frame %d @ %dms: detection %d (%s) conf=%.2f bbox=%s embed=%s",
                     event.frame,
                     event.ts_ms,
-                    event.track_id_local,
+                    event.detection_id,
                     event.clazz,
                     event.conf,
                     event.box_xyxy,
@@ -584,11 +494,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             need_vis = (video_out is not None) or (web_viewer is not None)
             if need_vis:
                 vis = frame_bgr.copy()
-                track_tuples = [
-                    (track.id, track.box_xyxy, track.clazz, float(track.conf))
-                    for track in tracks
+                detection_tuples = [
+                    (det.id, det.box_xyxy, det.clazz, float(det.conf))
+                    for det in observations
                 ]
-                draw_tracks(vis, track_tuples, draw_scores=draw_scores)
+                draw_detections(vis, detection_tuples, draw_scores=draw_scores)
                 if draw_diag:
                     stats = {
                         "cam_id": cam_id,
@@ -599,8 +509,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         "frame_idx": frame_idx,
                         "fps": fps_ema or 0.0,
                         "n_dets": len(detections),
-                        "n_tracks": len(track_tuples),
-                        "tracker": tracker_meta,
+                        "n_detections": len(detection_tuples),
                     }
                     draw_hud(
                         vis,

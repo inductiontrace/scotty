@@ -1,7 +1,7 @@
 edge:
   cam_id: "pi5_cam_a"
   fps: 1.0
-  emit_jsonl: "data/tracks.jsonl"
+  emit_jsonl: "data/detections.jsonl"
   mqtt: null  # e.g., "mqtts://user:pass@host:8883/topic"
   web:
     enabled: true
@@ -27,36 +27,9 @@ quiddity:
   iou_th: 0.5
   classes_include: ["person", "car"]
 
-tracker:
-  impl: "tracker.sort:SORT"
-  iou_threshold: 0.3
-  max_age: 12
-  min_hits: 2
-  class_consistency:
-    enabled: true
-    penalty: 1000000
-  core_center:
-    enabled: true
-    shrink: 0.30
-  scale_gate:
-    enabled: true
-    grow_tol: 1.60
-    shrink_tol: 0.60
-  dilate_for_assoc:
-    enabled: true
-    dx: 0.15
-    dy: 0.05
-  duplicate_merge:
-    enabled: true
-    iou_thresh: 0.6
-    min_frames: 3
-
 haecceity:
-  new_id_threshold: 0.55
-  hysteresis: 0.05
   min_bbox_h_frac: 0.08
   min_sharpness: 25.0
-  embed_interval_frames: 3
   specialists:
     - impl: "haecceity.person_osnet:PersonOSNet025"
       model_path: "models/osnet_x0_25.onnx"
