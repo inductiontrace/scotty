@@ -1,6 +1,7 @@
 edge:
   cam_id: "pi5_cam_a"
   fps: 1.0
+  source: "picam"
   emit_jsonl: "data/detections.jsonl"
   mqtt: null  # e.g., "mqtts://user:pass@host:8883/topic"
   web:
