@@ -1,9 +1,39 @@
 from typing import Iterable, List, Optional, Set, Tuple
 
+import logging
+import os
+import pathlib
+import shutil
+import tempfile
+import urllib.request
+
 import numpy as np
 from ultralytics import YOLO
 
 from common.interfaces import BBox, Detector
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _download_weights(url: str, destination: pathlib.Path) -> None:
+    """Download a model artifact to ``destination`` atomically."""
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    LOGGER.info("Downloading YOLOE weights from %s", url)
+    tmp_name = None
+    try:
+        with urllib.request.urlopen(url) as response:
+            with tempfile.NamedTemporaryFile(
+                delete=False, dir=str(destination.parent)
+            ) as tmp_fh:
+                shutil.copyfileobj(response, tmp_fh)
+                tmp_name = tmp_fh.name
+        os.replace(tmp_name, destination)
+    except Exception:
+        if tmp_name and os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+        raise
 
 
 def _area_frac(box: BBox, width: int, height: int) -> float:
@@ -25,16 +55,26 @@ class YOLOEPT(Detector):
 
         model_name = cfg.get("model_name")
         model_path = cfg.get("model_path")
+        model_url = cfg.get("model_url")
 
         if model_path and model_name:
             raise ValueError("Specify only one of 'model_path' or 'model_name'.")
+        if model_url and not model_path:
+            raise ValueError("'model_url' requires 'model_path' to be set.")
 
         if model_path:
-            self.model = YOLO(model_path)
+            weights_path = pathlib.Path(model_path)
+            if not weights_path.exists():
+                if not model_url:
+                    raise FileNotFoundError(
+                        f"Model path '{weights_path}' does not exist and no 'model_url' was provided."
+                    )
+                _download_weights(str(model_url), weights_path)
+            self.model = YOLO(str(weights_path))
         else:
-            # Default to Ultralytics alias download for backwards compatibility
-            model_name = model_name or "yolov8s"
-            self.model = YOLO(model_name)
+            if not model_name:
+                raise ValueError("Specify either 'model_path' or 'model_name'.")
+            self.model = YOLO(str(model_name))
 
     def detect(self, frame_bgr: np.ndarray) -> List[Tuple[BBox, float, str]]:
         height, width = frame_bgr.shape[:2]

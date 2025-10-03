@@ -20,23 +20,18 @@ intuitus:
   max_area_frac: 0.4
 
 quiddity:
-  impl: "quiddity.yolo_ort:YOLOv8ORT"
-  model_path: "models/yolov8n.onnx"
-  img_size: 512
+  impl: "quiddity.yoloe_pt:YOLOEPT"
+  model_path: "models/yoloe.pt"
+  model_url: "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8s.pt"
   conf_th: 0.35
-  iou_th: 0.5
+  min_box_area_frac: 0.002
+  max_box_area_frac: 0.85
   classes_include: ["person", "car"]
+  dedup:
+    enabled: true
+    iou_thr: 0.6
 
 haecceity:
-  min_bbox_h_frac: 0.08
-  min_sharpness: 25.0
-  specialists:
-    - impl: "haecceity.person_osnet:PersonOSNet025"
-      model_path: "models/osnet_x0_25.onnx"
-      crop: 192
-    - impl: "haecceity.vehicle_signature:VehicleSignature"
-      hist_bins: 32
-  fallbacks:
-    - impl: "haecceity.generic_osnet:GenericOSNet025"
-      model_path: "models/osnet_x0_25.onnx"
-      crop: 192
+  embed_classes: []
+  specialists: []
+  fallbacks: []
