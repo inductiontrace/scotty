@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import json
 
 
@@ -10,8 +10,7 @@ class DetectionEvent:
     ts_ms: int
     cam_id: str
     frame: int
-    track_id_local: int
-    global_id: Optional[int]
+    detection_id: int
     clazz: str
     conf: float
     box_xyxy: Tuple[int, int, int, int]
@@ -19,6 +18,7 @@ class DetectionEvent:
     have_embed: bool
     specialist: Optional[str] = None
     quality: Optional[Dict] = None
+    embedding: Optional[List[float]] = None
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), separators=(",", ":"))

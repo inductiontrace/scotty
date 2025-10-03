@@ -5,7 +5,7 @@ edge:
   source:
     kind: zmq
     endpoint: tcp://127.0.0.1:5555
-  emit_jsonl: "data/stage1_tracks.jsonl"
+  emit_jsonl: "data/stage1_detections.jsonl"
   web:
     enabled: true
     host: "0.0.0.0"
@@ -34,25 +34,6 @@ quiddity:
     enabled: true
     iou_thr: 0.6
 
-tracker:
-  impl: "tracker.db_tracker:DBTracker"
-  max_age: 10
-  min_hits: 2
-  center_gate_frac: 0.25
-  maha_gate_p: 0.995
-  w_center: 1.0
-  w_scale: 0.2
-  w_aspect: 0.2
-  w_app: 0.0
-  q_pos: 1.0
-  q_sz: 2.0
-  r_pos: 0.12
-  r_sz: 0.4
-  merge_dups:
-    enabled: true
-    iou_thr: 0.8
-    hold: 2
-
 haecceity:
   embed_classes: []  # disable embeddings
   specialists: []
@@ -62,9 +43,6 @@ haecceity:
 # (Uncomment this block instead of Variant A)
 # haecceity:
 #   embed_classes: ["person"]
-#   new_id_threshold: 0.55
-#   hysteresis: 0.05
-#   embed_interval_frames: 3
 #   specialists:
 #     - impl: "haecceity.person_torchreid:PersonTorchreid"
 #       model_name: "osnet_x0_25"

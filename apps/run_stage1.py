@@ -38,6 +38,7 @@ def main():
     last = 0.0
     frame_idx = 0
     ema_fps = None
+    next_detection_id = 1
 
     try:
         while True:
@@ -64,17 +65,18 @@ def main():
                     ts_ms=int(time.time()*1000),
                     cam_id=cam_id,
                     frame=frame_idx,
-                    track_id_local=-1,
-                    global_id=None,
+                    detection_id=next_detection_id,
                     clazz=clazz,
                     conf=float(conf),
                     box_xyxy=(int(x1),int(y1),int(x2),int(y2)),
                     img_wh=(int(W),int(H)),
                     have_embed=False,
                     specialist=None,
-                    quality=None
+                    quality=None,
+                    embedding=None
                 )
                 out.write(ev.to_json()+"\n")
+                next_detection_id += 1
 
             inst_fps = 1000.0 / max(1.0, infer_ms)
             ema_fps = inst_fps if ema_fps is None else 0.9*ema_fps + 0.1*inst_fps

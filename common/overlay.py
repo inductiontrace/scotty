@@ -1,4 +1,4 @@
-"""Utilities for drawing tracking overlays on video frames."""
+"""Utilities for drawing detection overlays on video frames."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Iterable, Mapping, Tuple
 import cv2
 
 BBox = Tuple[int, int, int, int]
-TrackTuple = Tuple[int, BBox, str, float]
+DetectionTuple = Tuple[int, BBox, str, float]
 
 
 def _put_boxed_text(
@@ -40,16 +40,18 @@ def _put_boxed_text(
     cv2.putText(img, text, (x + pad, y - base), font, font_scale, fg, thickness, cv2.LINE_AA)
 
 
-def draw_tracks(frame, tracks: Iterable[TrackTuple], draw_scores: bool = True):
-    """Annotate ``frame`` with bounding boxes and labels for ``tracks``."""
+def draw_detections(
+    frame, detections: Iterable[DetectionTuple], draw_scores: bool = True
+):
+    """Annotate ``frame`` with bounding boxes and labels for detections."""
 
-    for tid, (x1, y1, x2, y2), clazz, conf in tracks:
-        color = (37 * tid % 255, 17 * tid % 255, 89 * tid % 255)
+    for det_id, (x1, y1, x2, y2), clazz, conf in detections:
+        color = (37 * det_id % 255, 17 * det_id % 255, 89 * det_id % 255)
         pt1 = (int(x1), int(y1))
         pt2 = (int(x2), int(y2))
         cv2.rectangle(frame, pt1, pt2, color, 2)
 
-        tag = f"{clazz} {tid}"
+        tag = f"{clazz} {det_id}"
         if draw_scores:
             tag += f"  {conf:.2f}"
 
@@ -84,29 +86,8 @@ def draw_hud(
         ),
         f"t={stats.get('ts_str', '')}",
         f"frame: {stats.get('frame_idx', 0)}   fps~{stats.get('fps', 0.0):.2f}",
-        f"dets: {stats.get('n_dets', 0)}   tracks: {stats.get('n_tracks', 0)}",
+        f"dets: {stats.get('n_dets', 0)}   emitted: {stats.get('n_detections', 0)}",
     ]
-
-    tracker_stats = stats.get("tracker", {}) or {}
-    if tracker_stats:
-        name = tracker_stats.get("name", "")
-        max_age = tracker_stats.get("max_age", "?")
-        min_hits = tracker_stats.get("min_hits", "?")
-        iou_thr = tracker_stats.get("iou_threshold")
-        if iou_thr is not None:
-            lines.append(
-                f"tracker: {name}  iou_thr={float(iou_thr):.2f}  age={max_age}  hits={min_hits}"
-            )
-        else:
-            cg = tracker_stats.get("center_gate_frac", "?")
-            maha = tracker_stats.get("maha_gate_p", "?")
-            if isinstance(cg, (int, float)):
-                cg = f"{cg:.2f}"
-            if isinstance(maha, (int, float)):
-                maha = f"{maha:.3f}"
-            lines.append(
-                f"tracker: {name}  cg={cg}  maha_p={maha}  age={max_age}  hits={min_hits}"
-            )
 
     font = cv2.FONT_HERSHEY_SIMPLEX
     height, width = frame.shape[:2]

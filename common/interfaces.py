@@ -45,18 +45,3 @@ class IdSpecialist:
         return float((e1 * e2).sum())
 
 
-class Tracker:
-    """Simple multi-object tracker (SORT/BYTETrack-style)."""
-
-    def step(self, dets: List[Tuple[BBox, float, str]]) -> List["Track"]:
-        raise NotImplementedError
-
-
-class Track:
-    """Lightweight track holder used by ``Tracker`` implementations."""
-
-    id: int
-    box_xyxy: BBox
-    conf: float
-    clazz: str
-    # Optional extra fields for embeds/state may be added by tracker/haecceity.
